@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+.DS_Store
+output/*.ts
+*.egg-info/
+.venv/
+output/
+output_component/
