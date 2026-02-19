@@ -1,163 +1,198 @@
-# Guided Component Architect
+# Guided Component Architect — Local Version (deepseek-coder:6.7b via Ollama)
 
-Describe a UI in plain English. Get a ready-to-use Angular component back — TypeScript, HTML, and CSS — with your design system automatically enforced.
+This is the offline branch of Guided Component Architect. It runs the same agentic pipeline as the `main` branch but uses **deepseek-coder:6.7b running locally via Ollama** — no API key, no internet, no cost.
 
+For the Groq cloud version (easier to run, no model download), see the `main` branch.
 
 ---
 
 ## What it does
 
-You type something like *"a login card with glassmorphism effect"* and the pipeline:
-
-1. Sends it to an LLM (via Groq) with your design tokens baked into the prompt
-2. Parses the output into three separate files (`.ts`, `.html`, `.css`)
-3. Runs a validator that checks syntax, HTML tag balance, bracket matching, and whether your design tokens actually appear in the code
-4. If anything fails, a second LLM call fixes only the broken parts and the validator runs again
-5. Saves the final files to `output_component/`
-
-The whole thing runs in a Streamlit UI with a chat interface, so you can also do follow-up edits like *"now make the button full width"* and it carries the previous component as context.
+Same pipeline as the main version — describe a UI, get back a 3-file Angular component (`.ts`, `.html`, `.css`) with your design system enforced. The difference is everything runs on your machine.
 
 ---
 
 ## Agentic Loop Architecture
 
-The pipeline is built as an agentic loop — a sequence of steps where the output of one stage feeds into the next, with a built-in self-correction cycle if something goes wrong.
-
 ```
 User Input
     │
     ▼
-[1] Sanitizer          utils.py — strips injection patterns, truncates to 500 chars
+[1] Sanitizer      main.py — strips injection patterns, truncates to 500 chars
     │
     ▼
-[2] Generator          generator.py — sends prompt + design tokens to Llama 3.3 70B via Groq
-    │  raw LLM output
+[2] Generator      agents/generator.py — calls deepseek-coder:6.7b via Ollama
+    │  raw output (markdown fences stripped automatically)
     ▼
-[3] Parser             parser.py — extracts .ts / .html / .css sections from raw text
-    │  parsed files
-    ▼
-[4] Validator          validator.py — 4 checks: TS syntax, HTML tags, CSS tokens, design system
+[3] Validator      agents/validator.py — 6 checks, zero LLM involvement
     │
-    ├── VALID ──────────────────────────────────────► Save to output_component/  ✅
+    ├── VALID ─────────────────────────────► Write to output_component/  ✅
     │
     └── INVALID
-           │  errors passed verbatim
+           │  exact error strings passed to fixer
            ▼
-       [5] Fixer        generator.py — second LLM call with original code + error list
-           │  fixed output
+       [4] Fixer   agents/fixer.py — second Ollama call with code + errors
+           │
            ▼
-       [6] Parser + Validator (re-run)
+       [5] Validator (re-run)
            │
-           ├── VALID ──────────────────────────────► Save to output_component/  ✅
-           │
-           └── INVALID ────────────────────────────► Save with warning, show errors in UI  ⚠️
+           ├── VALID ──────────────────────► Write to output_component/  ✅
+           └── INVALID ────────────────────► Save raw output + exit(2)   ⚠️
 ```
 
-**Why this structure matters:**
+**Key design decisions:**
 
-- The validator is completely separate from the LLM — it's pure Python with no AI calls. This means validation results are deterministic and can't be influenced by a model that's been given bad instructions.
-- The fixer receives the *exact* error strings from the validator, not a vague "something went wrong" message. This makes the correction targeted — it doesn't redesign the component, it fixes only what failed.
-- The loop runs at most twice (one generate + one fix). This keeps latency predictable and avoids infinite retry loops.
-- Every attempt is logged to `attempt_log` in the result dict, which the Streamlit UI exposes in an expandable section so you can see what failed and what was corrected.
-
+- Markdown fences (`\`\`\`typescript`, `\`\`\`css`) are stripped automatically in `llm_client.py` — deepseek-coder adds them even when told not to, so stripping happens as a post-processing step after every LLM call, not in the prompt.
+- The validator is pure Python — regex, bracket counter, HTML stack parser. No LLM call, fully deterministic.
+- The fixer receives the exact validator error strings verbatim so the correction is surgical, not a full regeneration.
+- One retry maximum. Predictable latency.
 
 ---
+
 ## Setup
 
-**Requirements:** Python 3.10+, a free Groq API key from [console.groq.com](https://console.groq.com)
+**Requirements:** Python 3.10+, Ollama installed
 
+### Step 1 — Install Ollama
+Download from [ollama.com/download](https://ollama.com/download) (Windows / Mac / Linux)
+
+### Step 2 — Pull the model (~3.8 GB, one time)
 ```bash
-git clone https://github.com/YOUR_USERNAME/guided-component-architect
-cd guided-component-architect
+ollama pull deepseek-coder:6.7b
+```
+
+### Step 3 — Start Ollama server
+```bash
+ollama serve
+```
+Keep this terminal open. Ollama runs at `http://localhost:11434`.
+
+### Step 4 — Set up the project
+```bash
+cd guided-component-architect   # this folder
 
 python -m venv .venv
-.venv\Scripts\activate        # Windows
+.venv\Scripts\activate          # Windows
 # or: source .venv/bin/activate  (Mac/Linux)
 
 pip install -r requirements.txt
 ```
 
-Copy the env file and add your key:
+### Step 5 — Copy env file
 ```bash
 cp .env.example .env
-# Open .env and paste your GROQ_API_KEY
+# No edits needed — defaults point to localhost:11434
 ```
 
-Run it:
+### Step 6 — Run
 ```bash
-streamlit run app.py
+python main.py
 ```
 
-Opens at `http://localhost:8501`
+---
+
+## Example session
+
+```
+============================================================
+   Guided Component Architect
+   Model : deepseek-coder:6.7b  (local via Ollama)
+   API   : http://localhost:11434/v1  (no internet needed)
+============================================================
+
+Describe the component: A login card with glassmorphism effect
+
+[Generator] Calling deepseek-coder:6.7b...
+[Generator] Response received.
+
+[Validator] Running checks...
+[Validator] ✅  All checks passed on first attempt.
+
+✅  Files written to output_component/:
+    output_component/login.component.ts
+    output_component/login.component.html
+    output_component/login.component.css
+```
 
 ---
 
 ## Project structure
 
 ```
-src/
-  agent_loop.py   — orchestrates the full pipeline end to end
-  generator.py    — LLM calls for generation and fixing (Groq)
-  validator.py    — checks syntax, HTML tags, brackets, and design token usage
-  parser.py       — extracts ts/html/css sections from raw LLM output
-  utils.py        — input sanitization, kebab-case naming, file saving
+agents/
+  __init__.py     — package marker
+  generator.py    — builds system prompt with design tokens, calls Ollama
+  validator.py    — 6-check static linter (Pydantic v2, no LLM)
+  fixer.py        — sends failed code + errors back to Ollama for correction
 
-app.py            — Streamlit UI with chat input, tab view, download buttons
-design_system.json — the token file the validator enforces against
-output_component/ — generated files land here
+llm_client.py     — OpenAI-SDK client pointed at http://localhost:11434/v1
+                    strips markdown fences from every response
+prompts.py        — SYSTEM_GENERATOR_PROMPT and FIXER_PROMPT_TEMPLATE
+design_tokens.json — immutable design system (primary color, font, shadow, etc.)
+main.py           — pipeline entry point
+requirements.txt
+.env.example
+output_component/ — generated Angular files land here (git-ignored)
 ```
 
 ---
 
-## Design system
+## Validation checks
 
-Defined in `design_system.json`. The validator checks that every generated component actually uses the tokens — not just mentions them in the prompt. If a component uses an unauthorized hex color or skips the font-family, it fails and gets sent back for correction.
+Six checks run on every generated component — none of them use the LLM:
 
-Current tokens include primary color `#6366f1`, Inter font, glassmorphism values, card shadow, border radius, and spacing units.
-
----
-
-## How the validation works
-
-The validator runs four separate checks on each generated component:
-
-- **TypeScript** — checks for `@Component`, `selector`, `templateUrl`, `styleUrls`, `export class`, and balanced brackets
-- **HTML** — stack-based tag balance checker, catches unclosed and mismatched tags
-- **CSS** — checks brace balance, font-family token, card shadow token
-- **Design tokens** — scans combined HTML+CSS for primary color, border radius, and flags any hex color that isn't in the design system
-
-If any check fails, the exact error messages (e.g. `[DESIGN_TOKEN] Missing primary-color — expected #6366f1`) get passed to a second LLM call that fixes only those issues without changing the rest of the component.
+1. All three sections present (`.ts`, `.html`, `.css`)
+2. Primary color `#6366f1` appears in CSS or HTML
+3. `border-radius: 8px` appears in CSS
+4. `font-family: Inter` appears in CSS
+5. Balanced `{}`, `()`, `[]` in TypeScript and CSS
+6. `@Component` decorator and `export class` present in TypeScript
+7. HTML tag balance via stack parser
 
 ---
 
-## Multi-turn editing
+## Design tokens (`design_tokens.json`)
 
-The chat interface supports follow-up prompts. When you send a second message, the pipeline appends the first 400 characters of the previously generated `.ts` file as context so the model knows what it's modifying. 
+```json
+{
+  "primary_color": "#6366f1",
+  "secondary_color": "#22c55e",
+  "border_radius": "8px",
+  "font_family": "Inter",
+  "card_padding": "24px",
+  "shadow": "0 10px 25px rgba(0,0,0,0.15)"
+}
+```
+
+Loaded by the system at startup. User cannot override these through the prompt.
 
 ---
 
 ## Prompt injection handling
 
-User input goes through `sanitize_prompt()` in `utils.py` before hitting the LLM. It scans for patterns like "ignore previous instructions", "act as", "you are now", and replaces them with `[REDACTED]`. Input is also truncated at 500 characters. Design token values are injected from the server-side JSON file, not from user input, so they can't be overridden through the chat.
-
-The Streamlit UI also surfaces a warning banner if an injection attempt is detected and neutralized, so it's visible in the interface — not just silently handled in the backend.
+- All design token values go into the **system role** message, not the user message
+- `_sanitize_input()` in `main.py` strips 10 known injection trigger phrases and truncates input at 500 characters
+- The validator uses no LLM — it cannot be socially engineered
+- Generated code is only written to disk, never executed
 
 ---
 
-## Two versions
+## Compared to main branch
 
-| Branch | Model | How to run |
+| | `main` (Groq) | `feat/local-ollama` (this branch) |
 |---|---|---|
-| `main` |  Groq (cloud) | Add `GROQ_API_KEY` to `.env`, run `streamlit run app.py` |
-| `feat/local-ollama` | deepseek-coder:6.7b via Ollama (local) | Install Ollama, `ollama pull deepseek-coder:6.7b`, run `python main.py` |
-
-The local version runs fully offline — no API key, no internet. Tradeoff is a ~4GB model download and slower generation. Both versions use the same design system enforcement and agentic loop logic.
+| Model |  Groq | deepseek-coder:6.7b via Ollama |
+| Internet required | Yes (API call) | No |
+| API key needed | Yes (free) | No |
+| UI | Streamlit web app | Terminal (CLI) |
+| Setup time | ~2 minutes | ~10 min + 4GB download |
+| Generation speed | Fast (~5s) | Depends on hardware |
 
 ---
 
 ## Assumptions
 
-- Angular and Tailwind CSS are pre-installed in whatever project you copy the output files into
-- The Groq free tier is sufficient — handles the structured output format reliably
-- Generated components use `standalone: true` (Angular 14+); `FormsModule` and `CommonModule` need to be in the `imports` array if using reactive forms
-- The pipeline performs one automatic fix attempt; if it still fails after that, the output is saved with a warning and the errors are shown in the UI
+- Angular and Tailwind CSS are pre-installed in the project where you use the output files
+- Python 3.10+ is available
+- Hardware recommendation: 8GB RAM minimum; 16GB preferred for comfortable generation speed
+- Generated components are Angular 21 compatible (`standalone: true` required — add it manually if the model omits it)
