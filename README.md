@@ -19,6 +19,49 @@ The whole thing runs in a Streamlit UI with a chat interface, so you can also do
 
 ---
 
+## Agentic Loop Architecture
+
+The pipeline is built as an agentic loop — a sequence of steps where the output of one stage feeds into the next, with a built-in self-correction cycle if something goes wrong.
+
+```
+User Input
+    │
+    ▼
+[1] Sanitizer          utils.py — strips injection patterns, truncates to 500 chars
+    │
+    ▼
+[2] Generator          generator.py — sends prompt + design tokens to Llama 3.3 70B via Groq
+    │  raw LLM output
+    ▼
+[3] Parser             parser.py — extracts .ts / .html / .css sections from raw text
+    │  parsed files
+    ▼
+[4] Validator          validator.py — 4 checks: TS syntax, HTML tags, CSS tokens, design system
+    │
+    ├── VALID ──────────────────────────────────────► Save to output_component/  ✅
+    │
+    └── INVALID
+           │  errors passed verbatim
+           ▼
+       [5] Fixer        generator.py — second LLM call with original code + error list
+           │  fixed output
+           ▼
+       [6] Parser + Validator (re-run)
+           │
+           ├── VALID ──────────────────────────────► Save to output_component/  ✅
+           │
+           └── INVALID ────────────────────────────► Save with warning, show errors in UI  ⚠️
+```
+
+**Why this structure matters:**
+
+- The validator is completely separate from the LLM — it's pure Python with no AI calls. This means validation results are deterministic and can't be influenced by a model that's been given bad instructions.
+- The fixer receives the *exact* error strings from the validator, not a vague "something went wrong" message. This makes the correction targeted — it doesn't redesign the component, it fixes only what failed.
+- The loop runs at most twice (one generate + one fix). This keeps latency predictable and avoids infinite retry loops.
+- Every attempt is logged to `attempt_log` in the result dict, which the Streamlit UI exposes in an expandable section so you can see what failed and what was corrected.
+
+
+---
 ## Setup
 
 **Requirements:** Python 3.10+, a free Groq API key from [console.groq.com](https://console.groq.com)
