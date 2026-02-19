@@ -1,0 +1,8 @@
+{
+  "primary_color": "#6366f1",
+  "secondary_color": "#22c55e",
+  "border_radius": "8px",
+  "font_family": "Inter",
+  "card_padding": "24px",
+  "shadow": "0 10px 25px rgba(0,0,0,0.15)"
+}
