@@ -30,7 +30,7 @@ User Input
 [1] Sanitizer          utils.py — strips injection patterns, truncates to 500 chars
     │
     ▼
-[2] Generator          generator.py — sends prompt + design tokens to Llama 3.3 70B via Groq
+[2] Generator          generator.py — sends prompt + design tokens to Groq via API
     │  raw LLM output
     ▼
 [3] Parser             parser.py — extracts .ts / .html / .css sections from raw text
