@@ -67,7 +67,7 @@ User Input
 **Requirements:** Python 3.10+, a free Groq API key from [console.groq.com](https://console.groq.com)
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/guided-component-architect
+git clone https://github.com/pranavyk10/guided-component-architect
 cd guided-component-architect
 
 python -m venv .venv
